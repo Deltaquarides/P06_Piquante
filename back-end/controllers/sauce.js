@@ -1,0 +1,202 @@
+const Sauce = require('../models/sauce');
+const fs = require('fs');
+
+
+exports.createSauce = (req, res, next) => {
+
+    const sauceObject = JSON.parse(req.body.sauce); //--Parser l'objet requête car il est envoyer sous la  forme de FORM-DATA et non JSON. On le transforme objet JS.
+    delete sauceObject._id; // supprimé l'id de l'objet car notre base de données va creer automatiqument un id.
+    delete sauceObject._userId; //Supprimé userId car on ne fait pas confiance au client, il peut utiliser un autre userid. On va plutôt utiliser le userID qui vient du token d'authentification.
+    const sauce = new Sauce({
+        ...sauceObject, //L'opérateur spread ... est utilisé pour faire une copie de tous les éléments de req.body.
+        userId: req.auth.userId,
+        imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}` // On génère l'URL par nou même. req.protocol=http.Ajout de '://'.red.get('host'= localgost:3000).image= répertoire image et le nom du fichier.
+    });
+
+    sauce.save()
+        .then(() => {
+            res.status(201).json({
+                message: 'Objet enregistré !'
+            })
+        })
+        .catch(error => res.status(400).json({
+            error
+        }));
+};
+
+
+exports.allSauce = (req, res, next) => {
+    Sauce.find()
+        .then(sauces => {
+            res.status(200).json(sauces)
+        })
+        .catch(error => res.status(400).json({
+            error
+        }));
+};
+
+
+exports.getOneSauce = (req, res, next) => { // On implémente une requête GET pour un seule objet avec la méthode findById.
+    Sauce.findById({
+            _id: req.params.id // l'id de la sauce en vente doit être le même que le paramètre de requête passé à notre route.
+
+        })
+        .then((sauce) => {
+            res.status(200).json(sauce);
+        }) // retourne la sauce s'il existe dans la base de donées.
+        .catch((error) => {
+            res.status(404).json({
+                error: error
+            })
+        });
+};
+
+
+
+exports.modifySauce = (req, res, next) => {
+    const sauceObjet = req.file ? { //On regarde s'il y a un champ file dans notre objet.
+
+        ...JSON.parse(req.body.sauce), // si c'eest le cas on parse la chaîne de caractère.
+        imageUrl: `${req.protocol}://${req.get('host')}/images/${req.file.filename}` // et on recréer l'image et son URL.
+
+    } : {
+        ...req.body
+    }; //sinon on récupère l'objet dans le corps de la requête.
+
+    // 1er argument savoir quelle sauce on modifie, celui dont l'id est égal a l'id envoyé dans le paramètre de l'objet.
+    //2ème argument la nouvelle version de la sauce, on utilise le spread opérator pour récupérer la sauce qui est dans le corps de la requête, en précisant que l'id correspond à celui des paramètres
+    Sauce.updateOne({
+            _id: req.params.id
+        }, {
+            ...sauceObjet,
+            _id: req.params.id
+        })
+        .then(() => {
+            res.status(200).json({
+                message: " sauce modifié"
+            })
+        })
+        .catch((error) => {
+            res.status(400).json({
+                error: error
+            })
+        });
+};
+
+
+exports.deleteSauce = (req, res, next) => {
+
+    Sauce.findByIdAndDelete({
+            _id: req.params.id // l'id de la sauce en vente doit être le même que le paramètre de requête passé à notre route.
+        })
+        .then(() => {
+            res.status(200).json({
+                message: "sauce supprimé"
+            })
+        })
+        .catch((error) => {
+            res.status(404).json({
+                error: error
+            })
+        });
+}
+
+
+
+exports.likeSauce = (req, res, next) => {
+
+
+    if (req.body.like == 1) {
+
+        Sauce.updateOne({
+                _id: req.params.id
+            }, {
+                $push: {
+                    usersLiked: req.body.userId
+                },
+                $inc: {
+                    likes: +1
+                }
+            })
+            .then(() => res.status(200).json({
+                message: 'Sauce liké !'
+            }))
+            .catch(error => res.status(400).json({
+                error
+            }));
+    }
+
+
+    if (req.body.like == -1) {
+        Sauce.updateOne({
+                _id: req.params.id
+            }, {
+                $push: {
+                    usersDisliked: req.body.userId
+                },
+                $inc: {
+                    dislikes: +1
+                }
+            })
+
+            .then(() => res.status(200).json({
+                message: 'Sauce disliké !'
+            }))
+            .catch(error => res.status(400).json({
+                error
+            }));
+    }
+
+
+    if (req.body.like == 0) { //1st if
+        Sauce.findOne({
+                _id: req.params.id
+            })
+            .then((product) => {
+                if (product.usersLiked.includes(req.body.userId)) { //second if
+                    Sauce.updateOne({
+                            _id: req.params.id
+                        }, {
+                            $pull: {
+                                usersLiked: req.body.userId
+                            },
+                            $inc: {
+                                likes: -1
+                            }
+                        }) //findone
+                        .then(() => res.status(200).json({
+                            message: "Cette sauce n'est plus liké !"
+                        }))
+                        .catch(error => res.status(400).json({
+                            error
+                        }));
+                } //second if
+
+                if (product.usersDisliked.includes(req.body.userId)) {
+                    Sauce.updateOne({
+                            _id: req.params.id
+                        }, {
+                            $pull: {
+                                usersDisliked: req.body.userId
+                            },
+                            $inc: {
+                                dislikes: -1
+                            }
+                        })
+                        .then(() => res.status(200).json({
+                            message: "Cette sauce n'est plus disliké!"
+                        }))
+                        .catch(error => res.status(400).json({
+                            error
+                        }));
+                }
+            }) //then
+            .catch(error => res.status(400).json({
+                error
+            }));
+
+    } //1st if
+
+} //fin
+
+/// a refaire lien : https://github.com/Perceaurore/BenoitMagnan_6_23112020/blob/main/docs/backend/controllers/sauces.js
